@@ -1,6 +1,8 @@
 # Kirby Bettersearch plugin
 
-A search plugin for Kirby 3 that searches for full word combinations rather than just individual words.
+A search plugin for Kirby that searches for full word combinations rather than just individual words.
+
+Requires Kirby 6 and PHP 8.3–8.5. Searches are case-insensitive, including Unicode text.
 
 ## Installation
 
@@ -21,6 +23,8 @@ Since we're looking for _full query matches_, following options have been remove
 ## customIndexer
 
 If you need to manipulate the `content` somehow, you can now pass a `customIndexer` function into the bettersearch function to alter the content.
+
+The custom indexer must return an associative array. Field names passed in `$options['fields']` are matched case-insensitively against that array's keys.
 
 ## Disclaimer
 

@@ -1,18 +1,28 @@
 <?php
 
+use Kirby\Cms\App;
+use Kirby\Cms\Collection;
+use Kirby\Cms\Page;
+use Kirby\Cms\User;
+use Kirby\Exception\InvalidArgumentException;
+use Kirby\Toolkit\Str;
+
 /**
  * Fork of the native search() component
  * Only searches for full matches
  */
 function bettersearch(
-	Kirby\Cms\App $kirby,
-	Kirby\Cms\Collection $collection,
+	App $kirby,
+	Collection $collection,
 	?string $query = null,
 	string|array $params = [],
 	?callable $customIndexer = null
-) {
-	// empty search query
-	if (empty(trim($query ?? '')) === true) {
+): Collection {
+	$collection = clone $collection;
+	$query      = trim($query ?? '');
+
+	// Empty search query
+	if ($query === '') {
 		return $collection->limit(0);
 	}
 
@@ -20,44 +30,61 @@ function bettersearch(
 		$params = ['fields' => Str::split($params, '|')];
 	}
 
-	$defaults = [
+	$options = [
 		'fields'    => [],
-		'score'     => []
+		'score'     => [],
+		...$params
 	];
 
-	$options     = array_merge($defaults, $params);
-	$collection  = clone $collection;
+	if (is_array($options['fields']) === false) {
+		throw new InvalidArgumentException(
+			message: 'The "fields" search option must be an array'
+		);
+	}
 
-	// returns an empty collection if there is no search query
-	if (empty($query)) return $collection->limit(0);
+	if (is_array($options['score']) === false) {
+		throw new InvalidArgumentException(
+			message: 'The "score" search option must be an array'
+		);
+	}
 
+	$fields  = array_map(fn ($field) => Str::lower((string)$field), $options['fields']);
+	$pattern = '!' . preg_quote($query, '!') . '!iu';
 	$scores  = [];
-	$results = $collection->filter(function ($item) use ($query, $options, &$scores, $customIndexer) {
-		if (!is_null($customIndexer)) {
-			$data = $customIndexer($item);
-		} else {
-			$data = $item->content()->toArray();
+	$results = $collection->filter(function ($item) use ($fields, $pattern, $options, &$scores, $customIndexer) {
+		$data = $customIndexer !== null
+			? $customIndexer($item)
+			: $item->content()->toArray();
+
+		if (is_array($data) === false) {
+			throw new InvalidArgumentException(
+				message: 'The custom indexer must return an array'
+			);
 		}
+
 		$keys   = array_keys($data);
 		$keys[] = 'id';
+		$score  = array_change_key_case($options['score'], CASE_LOWER);
 
-		if ($item instanceof Kirby\Cms\User) {
+		if ($item instanceof User) {
 			$keys[] = 'name';
 			$keys[] = 'email';
 			$keys[] = 'role';
-		} elseif ($item instanceof Kirby\Cms\Page) {
+		} elseif ($item instanceof Page) {
 			// apply the default score for pages
-			$options['score'] = array_merge([
+			$score = [
 				'id'    => 64,
 				'title' => 64,
-			], $options['score']);
+				...$score
+			];
 		}
 
-		if (empty($options['fields']) === false) {
-			$fields = array_map('strtolower', $options['fields']);
-			$keys   = array_intersect($keys, $fields);
+		if ($fields !== []) {
+			$keys = array_filter(
+				$keys,
+				fn ($key) => in_array(Str::lower((string)$key), $fields, true)
+			);
 		}
-		// var_dump($keys);
 
 		$scoring = [
 			'hits'  => 0,
@@ -65,22 +92,15 @@ function bettersearch(
 		];
 
 		foreach ($keys as $key) {
-			$score = $options['score'][$key] ?? 1;
-			$value = $data[$key] ?? (string)$item->$key();
-
-			$lowerValue = Str::lower($value);
+			$field = Str::lower((string)$key);
+			$weight = $score[$field] ?? 1;
+			$value  = (string)($data[$key] ?? $item->$key());
 
 			// check for exact query matches
-			if ($matches = preg_match_all('!' . preg_quote($query) . '!i', $value, $r)) {
-				$scoring['score'] += 2 * $score;
+			if ($matches = preg_match_all($pattern, $value)) {
+				$scoring['score'] += 2 * $weight;
 				$scoring['hits']  += $matches;
 			}
-
-			// check for any match
-			// if ($matches = preg_match_all($preg, $value, $r)) {
-			//     $scoring['score'] += $matches * $score;
-			//     $scoring['hits']  += $matches;
-			// }
 		}
 
 		$scores[$item->id()] = $scoring;
@@ -88,7 +108,7 @@ function bettersearch(
 	});
 
 	return $results->sort(
-		fn($item) => $scores[$item->id()]['score'],
+		fn ($item) => $scores[$item->id()]['score'],
 		'desc'
 	);
 }
