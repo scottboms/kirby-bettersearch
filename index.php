@@ -9,7 +9,7 @@ require_once __DIR__ . '/src/bettersearch.php';
 
 $version = App::version() ?? '0.0.0';
 if (
-	version_compare($version, '6.0.0-beta.1', '<') ||
+	version_compare($version, '6.0.0', '<') ||
 	version_compare($version, '7.0.0', '>=')
 ) {
 	throw new RuntimeException('Better Search 6 requires Kirby 6');
